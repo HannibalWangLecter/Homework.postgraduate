@@ -1,0 +1,14 @@
+net: "AES.prototxt"
+test_iter: 3
+test_interval: 200
+base_lr: 0.0001
+momentum: 0.9
+lr_policy: "fixed"
+display: 100
+weight_decay: 0.005
+max_iter: 2000
+snapshot: 200
+average_loss: 500
+snapshot_prefix: "AES"
+type: "Nesterov"
+solver_mode: GPU

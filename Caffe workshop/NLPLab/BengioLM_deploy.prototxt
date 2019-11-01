@@ -1,0 +1,68 @@
+name: "Bengio's_Model"
+layer {
+  name: "data"
+  type: "Input"
+  top: "data"
+  input_param { shape: { dim: 1 dim: 3 } }
+}
+layer{
+	name: "WordEmbedding"
+	type: "Embed"
+	bottom: "data"
+	top: "WordEmbedding"
+	embed_param {
+		input_dim: 250
+		num_output: 50
+		weight_filler {
+    		type: "xavier"
+    	}
+    	bias_filler {
+      		type: "constant"
+      		value: 0
+    	}
+	}
+}
+layer{
+	name: "FC1"
+	type: "InnerProduct"
+	bottom: "WordEmbedding"
+	top: "FC1"
+	inner_product_param {
+		num_output: 200
+		weight_filler {
+     		type: "xavier"
+    	}
+    	bias_filler {
+      		type: "constant"
+      		value: 0
+    	}
+	}
+}
+layer {
+  name: "Tanh"
+  type: "TanH"
+  bottom: "FC1"
+  top: "FC1"
+}
+layer{
+	name: "predict"
+	type: "InnerProduct"
+	bottom: "FC1"
+	top: "predict"
+	inner_product_param {
+		num_output: 250
+		weight_filler {
+     		type: "xavier"
+    	}
+    	bias_filler {
+      		type: "constant"
+      		value: 0
+    	}
+	}
+}
+layer{
+	name: "probs"
+	type: "Softmax"
+	bottom: "predict"
+	top: "probs"
+}

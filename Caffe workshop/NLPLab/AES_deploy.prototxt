@@ -1,0 +1,101 @@
+name: "Bengio's_Model"
+layer {
+	name: "data"
+	type: "HDF5Data"
+	top: "data"
+	top: "label"
+	hdf5_data_param {
+		source: "trn_aes_hdf5_list.txt"
+		batch_size: 100
+		shuffle: true
+	}
+	include: { phase: TRAIN }
+}
+layer {
+	name: "data"
+	type: "HDF5Data"
+	top: "data"
+	top: "label"
+	hdf5_data_param {
+		source: "tst_aes_hdf5_list.txt"
+		batch_size: 100
+		shuffle: false
+	}
+	include: { phase: TEST }
+}
+layer {
+	name: "wrd2vec"
+	type: "Embed"
+	bottom: "data"
+	top: "wrd2vec"
+	embed_param {
+		input_dim: 701
+		num_output: 100
+		weight_filler {
+    		type: "xavier"
+    	}
+    	bias_filler {
+      		type: "constant"
+      		value: 0
+    	}
+	}
+}
+layer {
+	name: "FC1"
+	type: "InnerProduct"
+	bottom: "wrd2vec"
+	top: "FC1"
+	inner_product_param {
+		num_output: 200
+		weight_filler {
+     		type: "xavier"
+    	}
+    	bias_filler {
+      		type: "constant"
+      		value: 0
+    	}
+	}
+}
+layer {
+  name: "Tanh"
+  type: "TanH"
+  bottom: "FC1"
+  top: "FC1"
+}
+layer {
+	name: "pred"
+	type: "InnerProduct"
+	bottom: "FC1"
+	top: "pred"
+	inner_product_param {
+		num_output: 5
+		weight_filler {
+     		type: "xavier"
+    	}
+    	bias_filler {
+      		type: "constant"
+      		value: 0
+    	}
+	}
+}
+layer {
+	name: "probs"
+	type: "Softmax"
+	bottom: "pred"
+	top: "probs"
+}
+
+#layer {
+#  type: 'Python'
+#  name: 'QWK'
+#  top: 'QWK'
+#  bottom: 'probs'
+#  bottom: 'label'
+#  python_param {
+#    module: 'QWK'
+#    layer: 'QuadKappa'
+#  }
+#  include {
+#    phase: TEST
+#  }
+#}

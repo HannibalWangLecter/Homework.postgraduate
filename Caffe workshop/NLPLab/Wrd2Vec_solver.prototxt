@@ -1,0 +1,14 @@
+net: "Wrd2Vec.prototxt"
+base_lr: 0.0001
+momentum: 0.9
+momentum2: 0.999
+delta: 0.000000001
+lr_policy: "fixed"
+display: 100
+weight_decay: 0.005
+max_iter: 10000
+snapshot: 1000
+average_loss: 500
+snapshot_prefix: "CBoW"
+type: "Adam"
+solver_mode: GPU
