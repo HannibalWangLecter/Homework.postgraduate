@@ -1,0 +1,575 @@
+---
+title: "哪些客户特征可以预测客户是否流失？-基于R语言的SVM分类、模型优化及模型评估"
+author: "王昊(学号: 201821061107)     指导教师:段小刚"
+date: '2019年11月30日'
+output:
+  pdf_document: 
+    fig_caption: yes
+    includes:
+      in_header: header.tex
+    keep_tex: yes
+    latex_engine: xelatex
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+  html_document: 
+    toc: yes
+  word_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+---
+# 摘要
+一个电话公司感兴趣的是确定哪些客户特征对预测客户流失(客户将离开他们的服务)是有用的。本文采用支持向量机的方法探究哪些客户特征对预测客户流失有意义，并对参数进行调整，最后评价了各种不同的模型，得到了最好的模型。
+
+
+
+# 背景
+一个电话公司感兴趣的是确定哪些客户特征对预测客户流失(客户将离开他们的服务)是有用的。
+
+# 研究问题
+哪些客户特征对预测客户流失(客户将离开他们的服务)是有用的。
+
+# 对数据的描述性分析
+telecom churn 数据集来训练SVM。
+
+```{r}
+#从C50中获取telecom churn数据集
+#install.packages("C50")
+library(C50)
+data(churn)
+```
+
+```{r}
+#查看数据集结构
+str(churnTrain)
+```
+
+```{r}
+#删除一些没有贡献的属性
+churnTrain=churnTrain[,! names(churnTrain) %in% c("state","area_code","account_length")]
+
+#划分训练集和测试集
+set.seed(2)
+ind=sample(2,
+           nrow(churnTrain),
+           replace=TRUE,
+           prob=c(0.7,0.3))
+trainset=churnTrain[ind==1,]
+testset=churnTrain[ind==2,]
+
+
+#查看维度
+dim(trainset)
+dim(testset)
+```
+
+
+
+
+
+# 统计模型的具体形式
+## 使用支持向量机完成数据分类
+e1071包提供了libsvm的实现
+
+```{r}
+#install.packages("e1071")
+library(e1071)
+
+model=svm(churn~.,#churn是分类类别.
+          data=trainset,
+          kernel="radial",
+          cost=1,
+          gamma=1/ncol(trainset))#gamma函数确定了分离超平面的形状,默认为数据维度的倒数，提高gamma会增加支持向量的数量。
+
+summary(model)
+```
+
+## 选择支持向量机的惩罚因子
+能实现SVM对分类误差及分类边界的控制。惩罚因子比较小，分类间隔会比较大（软间隔），将产生比较多的被错分样本。
+
+## 实现SVM模型的可视化
+支持向量和类别被高亮显示。等高线图绘制类的边缘。
+```{r}
+plot(model,#模型名称
+     trainset,#样本数据集（和构建模型的数据集一致）
+     total_day_minutes ~ total_intl_charge)#分类图坐标轴的说明
+```
+红色的支持向量和黑色的数据样例在图中心区域排列很紧密，不能直接分开。
+
+## 基于支持向量机训练模型实现类预测
+1. 利用已构建的模型和测试数据集预测它的类别
+```{r}
+svm.pred=predict(model,
+                 testset[,!names(testset) %in% c("churn")])
+```
+2. 建立分类表
+```{r}
+svm.table=table(svm.pred,
+                testset$churn)
+```
+3. 分析一致性系数
+```{r}
+classAgreement(svm.table)
+```
+4. 基于分类表评测预测性能
+```{r}
+library(caret)
+confusionMatrix(svm.table)
+```
+
+## 调整支持向量机
+1. tune.svm
+```{r}
+tuned=tune.svm(churn~.,
+               data=trainset,
+               gamma=10^(-6:-1),
+               cost=10^(1:2))
+summary(tuned)
+```
+3. 最佳参数设置SVM
+```{r}
+model.tuned=svm(churn~.,
+                data=trainset,
+                gamma=tuned$best.parameters$gamma,
+                cost=tuned$best.parameters$cost)
+summary(model.tuned)
+```
+4. 类标号预测
+```{r}
+svm.tuned.pred=predict(model.tuned,
+                       testset[, !names(testset) %in% c("churn")])
+```
+5. 分类表
+```{r}
+svm.tuned.table=table(svm.tuned.pred,
+                      testset$churn)
+svm.tuned.table
+```
+6. 得到相关系数,完成算法性能评测
+```{r}
+classAgreement(svm.tuned.table)
+```
+7. 评测优化后的模型性能
+```{r}
+confusionMatrix(svm.tuned.table)
+```
+试错法寻找最佳的gamma和惩罚因子。
+
+
+
+# 模型的结果分析与解释
+
+## 模型评估
+### 基于k折交叉验证方法评测模型性能
+```{r}
+#索引分成10份
+ind=cut(1:nrow(churnTrain),
+        breaks=10,
+        labels=F)
+
+#SVM依赖
+library(e1071)
+#10折交叉验证
+accuracies=c()
+for (i in 1:10){
+  fit=svm(churn~.,
+          churnTrain[ind!=i,])
+  predictions=predict(fit,
+                      churnTrain[ind==i, !names(churnTrain) %in% c("churn")])
+  correct_count=sum(predictions==churnTrain[ind== i,c("churn")])
+  accuracies= append(correct_count/nrow(churnTrain[ind==i,]),
+                     accuracies)
+}
+
+#输出准确率
+accuracies
+
+mean(accuracies)
+```
+
+### 利用e1071包完成交叉验证
+tuning函数获取最小误差值。
+
+```{r}
+tuned=tune.svm(churn~.,
+               data=trainset,
+               gamma=10^-2,
+               cost=10^-2,
+               tunecontrol=tune.control(cross=10))
+
+summary(tuned)
+               
+```
+3. 模型的性能细节
+```{r}
+
+tuned$performances
+```
+4. 使用优化后的模型产生分类表
+```{r}
+svmfit=tuned$best.model
+table(trainset[,c("churn")],
+      predict(svmfit))
+```
+
+
+### 利用caret包完成交叉检验
+```{r}
+#install.packages("caret")
+library(caret)
+
+#重复的k折交叉验证,被用于检测模型的稳定性。如果稳定，用户将得到类似的测试结果。
+#设置控制训练参数,进行重复3次的10折交叉验证
+control=trainControl(method="repeatedcv",
+                     number=10,
+                     repeats=3)
+
+
+model=train(churn~.,
+            data=trainset,
+            method="rpart",
+            preProcess="scale",
+            trControl=control)
+
+model
+```
+模型输出了3次重新采样的结果，其中cp为0.555的模型准确率最高。
+### 利用caret包对变量重要程度排序
+比较给定模型输出效果的变化敏感程度来评估不同特征对模型的重要性。
+```{r}
+importance=varImp(model,scale=FALSE)
+importance
+```
+
+```{r}
+plot(importance)
+```
+
+### 利用caret包找到高度关联的特征
+如果能提前去掉高度关联的属性，训练模型的性能会更好。
+```{r}
+#去掉非数值类型的属性
+new_train=trainset[, !names(churnTrain)  %in% c("churn","international_plan","voice_mail_plan")]
+
+#计算每个属性之间的关联度
+cor_mat=cor(new_train)
+
+#找到关联度超过0.75的属性
+highlyCorrelated=findCorrelation(cor_mat,cutoff=0.75)
+
+names(new_train)[highlyCorrelated]
+```
+
+### 利用caret包选择特征
+递归特征排除函数`rfe`
+```{r}
+#international_plan的特征转换为intl_yes和Intl_no
+intl_plan=model.matrix(~ trainset.international_plan - 1,
+                       data=data.frame(trainset$international_plan))
+
+colnames(intl_plan)=c("trainset.international_planno"="intl_no",
+                      "trainset.international_planyes"="intl_yes")
+
+
+#voice_mail_plan的特征转换为voice_yes和voice_no
+voice_plan=model.matrix(~ trainset.voice_mail_plan-1,
+                        data=data.frame(trainset$voice_mail_plan))
+
+colnames(voice_plan)=c("trainset.voice_planno"="voice_no",
+                       "trainset.voice_planyes"="voice_yes")
+
+#去掉2个属性,并将训练数据与两个数据框合并
+trainset$international_plan=NULL
+trainset$voice_mail_plan=NULL
+trainset=cbind(intl_plan,voice_plan,trainset)
+
+#test数据集同理如上
+intl_plan=model.matrix(~ testset.international_plan - 1,
+                       data=data.frame(testset$international_plan))
+
+colnames(intl_plan)=c("testset.international_planno"="intl_no",
+                      "testset.international_planyes"="intl_yes")
+
+
+voice_plan=model.matrix(~ testset.voice_mail_plan-1, data=data.frame(testset$voice_mail_plan))
+
+colnames(voice_plan)=c("testset.voice_planno"="voice_no",
+                       "testset.voice_planyes"="voice_yes")
+
+
+testset$international_plan=NULL
+testset$voice_mail_plan=NULL
+testset=cbind(intl_plan,voice_plan,testset)
+
+```
+
+7. 使用LDA创建一个特征筛选
+```{r}
+ldaControl=rfeControl(functions = ldaFuncs,method="cv")
+```
+
+8. 利用从编号1-18的数据子集对训练数据集trainset进行反向特征筛选
+```{r warning=FALSE}
+
+ldaProfile=rfe(trainset[, !names(trainset) %in% c("churn")],trainset[,c("churn")],
+               sizes = c(1:18),
+               rfeControl = ldaControl)
+
+ldaProfile
+```
+
+9. 选择结果
+```{r}
+plot(ldaProfile,type=c("o","g"))
+```
+
+10. 检测最佳变量子集
+```{r}
+ldaProfile$optVariables
+```
+
+11. 检测合适的模型
+```{r}
+ldaProfile$fit
+```
+
+12. 重采样评估模型
+```{r}
+postResample(predict(ldaProfile,
+                     testset[, !names(testset) %in% c("churn")]),
+             testset[,c("churn")])
+```
+
+### 评测回归模型的性能
+相对平方差(Relative Square Error)。
+数据换用Quartet数据集。
+```{r}
+#install.packages("car")
+library(car)
+data(Quartet)
+
+plot(Quartet$x,Quartet$y3)
+lmfit=lm(Quartet$y3~Quartet$x)
+abline(lmfit,col="red")
+```
+
+3. 预测结果
+```{r}
+predicted=predict(lmfit,newdata=Quartet[c("x")])
+```
+
+4.均方误差
+```{r}
+actual=Quartet$y3
+rmse=(mean((predicted-actual)^2))^0.5
+rmse
+```
+5. 相对平方误差
+```{r}
+mu=mean(actual)
+rse=mean((predicted-actual)^2)/mean((mu-actual)^2)
+rse
+```
+6. $R^2$
+```{r}
+rsquare=1-rse
+rsquare
+```
+
+
+
+
+7. 采用MASS包重新计算y3的值。用模糊线性回归处理数据集。
+
+```{r}
+library(MASS)
+plot(Quartet$x,Quartet$y3)
+rlmfit=rlm(Quartet$y3~Quartet$x)
+abline(rlmfit, col="red")
+```
+
+8. 预测
+```{r}
+predicted=predict(rlmfit,newdata = Quartet[c("x")])
+```
+
+9. 均方根误差
+```{r}
+actual=Quartet$y3
+rmse=(mean((predicted-actual)^2))^0.5
+rmse
+```
+10. 相对平方误差
+```{r}
+mu=mean(actual)
+rse=mean((predicted-actual)^2)/mean((mu-actual)^2)
+rse
+```
+11. $R^2$
+```{r}
+rsquare=1-rse
+rsquare
+```
+lm方法建立的模型其RMSE和RSE要低于rlm，在$R^2$的比较中显示出lm建立的有更高的预测能力。
+实际操作中，我们会首先去掉x=13这个异常值。
+#### 线性回归模型上交叉验证
+```{r}
+tune(lm,y3~x,data=Quartet)
+```
+
+
+
+### 利用混淆矩阵评测模型的预测能力
+```{r}
+#install.packages("kernlab")
+svm.model=train(churn~., 
+                data=trainset, 
+                method="svmRadial") 
+svm.pred=predict(svm.model,
+                 testset[,!names(testset) %in% c("churn")])
+
+#分类表
+table(svm.pred,testset[,c("churn")])
+
+#预测结果和实际类标号的混淆矩阵
+confusionMatrix(svm.pred,testset[,c("churn")])
+```
+
+### 利用ROCR评测模型的预测能力
+```{r}
+#install.packages("ROCR")
+library(ROCR)
+
+svmfit=svm(churn~.,
+           data=trainset,
+           prob=TRUE)
+
+pred=predict(svmfit,
+             testset[,!names(testset) %in% c("churn")],
+             probability = TRUE)
+
+#得到标号为yes的概率
+pred.prob=attr(pred,"probabilities")
+pred.to.roc=pred.prob[,2]
+
+#预测结果
+pred.rocr=prediction(pred.to.roc,
+                     testset$churn)
+
+```
+6. 性能评估
+```{r}
+perf.rocr=performance(pred.rocr,
+                      measure="auc",
+                      x.measure = "cutoff")
+perf.tpr.rocr=performance(pred.rocr,
+                          "tpr",
+                          "fpr")
+plot(perf.tpr.rocr,
+     colorize=T,
+     main=paste("AUC: ",
+                (perf.rocr@y.values)))
+```
+
+### 利用caret包比较ROC曲线
+```{r warning=FALSE}
+#install.packages("pROC")
+
+library("pROC")
+#训练控制方法
+control=trainControl(method="repeatedcv",
+                     number=10,
+                     repeats=3,
+                     classProbs=TRUE,
+                     summaryFunction = twoClassSummary)
+
+#使用glm在训练数据集上训练一个分类器
+glm.model= train(churn~.,
+                 data=trainset,
+                 method="glm",
+                 metric="ROC",
+                 trControl=control)
+
+#使用svm在训练数据集上训练一个分类器
+svm.model=train(churn ~ .,
+                data = trainset,
+                method="svmRadial",
+                metric="ROC",
+                trControl = control)
+```
+
+5. 查看rpart在训练数据上的运行情况
+```{r}
+rpart.model = train(churn ~ .,
+                    data = trainset,
+                    method="rpart",
+                    metric="ROC",
+                    trControl=control)
+```
+
+6. 使用不同的已训练好的模型分别进行预测
+```{r}
+glm.probs  =predict(glm.model,
+                  testset[, ! names(testset) %in% c("churn")],
+                  type= "prob")
+svm.probs  =predict(svm.model,
+                  testset[, ! names(testset) %in% c("churn")],
+                  type= "prob")
+rpart.probs=predict(rpart.model,
+                  testset[, ! names(testset) %in% c("churn")],
+                  type= "prob")
+```
+
+7. 生成ROC曲线
+```{r warning=FALSE}
+glm.ROC=roc(response=testset[,c("churn")],
+            predictor=glm.probs$yes,
+            levels=levels(testset[,c("churn")]))
+plot(glm.ROC,type="S",col="red")
+
+
+svm.ROC=roc(response=testset[,c("churn")],
+            predictor=svm.probs$yes,
+            levels=levels(testset[,c("churn")]))
+plot(svm.ROC,add=TRUE,col="green")
+
+
+rpart.ROC=roc(response=testset[,c("churn")],
+            predictor=rpart.probs$yes,
+            levels=levels(testset[,c("churn")]))
+plot(rpart.ROC,add=TRUE,col="blue")
+```
+
+### 利用caret包比较模型性能差异
+重采样的得到每一个匹配模型的统计信息，包括ROC、灵敏度、特异度。
+
+1. 重采样
+```{r}
+cv.values=resamples(list(glm=glm.model,
+                         svm=svm.model,
+                         rpart=rpart.model))
+summary(cv.values)
+```
+
+3. 重采样在ROC曲线度量中的结果
+```{r}
+dotplot(cv.values,metrics="ROC")
+```
+
+4. 箱线绘制重采样结果
+```{r}
+bwplot(cv.values,layout=c(3,1))
+```
+
+# 参考文献
+[1]CHIU Y-W. Machine Learning with R Cookbook[M]. Packt Publishing Ltd, 2015.
+
+
+
+# 附录(代码)
+(将以文件形式附在压缩包内)

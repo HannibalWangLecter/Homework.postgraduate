@@ -1,0 +1,337 @@
+---
+title: "通过房屋特征预测房价-基于R语言的回归分析"
+author: "王昊(学号: 201821061107)     指导教师:段小刚"
+date: '2019年11月30日'
+output:
+  pdf_document: 
+    fig_caption: yes
+    includes:
+      in_header: header.tex
+    keep_tex: yes
+    latex_engine: xelatex
+    toc: yes
+    toc_depth: 4
+  html_document: 
+    toc: yes
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+---
+# 摘要
+这个报告主要通过房屋特征预测房价探究了R语言中对于特征变量的处理，缺失值的补充等。随后使用了一种特征选择的方法,并建立了最简单的线性模型来预测房价。
+
+
+# 背景
+给你提供一份有有关于美国Lowa市Ames的房价数据，其中包含79个feature，提供train和test样本，要求对test中的房价进行预测。
+
+# 研究问题
+基于竞赛方所提供的爱荷华州埃姆斯的住宅数据信息，预测每间房屋的销售价格。
+
+# 对数据的描述性分析
+数据的网址为：https://www.kaggle.com/c/house-prices-advanced-regression-techniques
+
+竞赛给了已经成交的近1500座房子的80个特征，然后让我们根据这些特征来预测房子的销售价格。数据集包含的特征字段相当多，除了地段、面积、层数等基本信息外，还有诸如地下室、离街道的距离、房屋的外墙材料等在国内完全不会关心的特征。 
+
+## 数据熟悉
+在动手构造模型之前，先熟悉一下数据的缺失和分布情况。
+首先下载训练数据和测试数据，放在目录下，然后合并训练数据和测试数据。其中SalePrice就是这次要预测的房价字段。
+
+## 读取训练数据集和测试数据集
+```{r}
+train <- read.csv("D:/我的坚果云/GitHubCode/R/R_Stat_Course/R_Homework/R_LR/house-prices-advanced-regression-techniques/train.csv")
+test <- read.csv("D:/我的坚果云/GitHubCode/R/R_Stat_Course/R_Homework/R_LR/house-prices-advanced-regression-techniques/test.csv")
+```
+
+## 合并两个训练集
+```{r}
+test$SalePrice <- NA    #把我们要预测的因变量置为空（未知量）
+all <- rbind(train, test)
+```
+
+## 查看所有变量的结构
+```{r}
+str(all)
+```
+其中，变量主要分为两类，一类为数字类型，一类为因子类型。
+
+## 获取数据中factor变量的个数
+```{r message=FALSE, warning=FALSE}
+res <- sapply(all, class) 
+#获取all这个数据集所有数据的类型,相当于class(all(1,2,3,.....n))
+#(apply可以实现对数据的循环、分组、过滤、类型控制等)
+
+table(res) #table 函数对应的就是统计学中的列联表，是一种记录频数的方法。
+```
+由以上结果可知，该数据集一共81个变量、2919个记录，其中43个因子变量，38个数字变量。
+
+
+## 特征处理
+从上面的变量取值情况可以看到数据集中有很多变量存在缺失值，所以第一步我们要处理缺失值。
+
+### 统计所有变量的缺失值
+首先按照各变量中的缺失值所占比例排序。
+```{r}
+#检查all里面所有的变量是否为缺省值,如果是的话，放入res
+res <- sapply(all, function(x)  sum(is.na(x)) )
+```
+
+### 按照缺失率排序
+```{r}
+miss <- sort(res, decreasing=T)
+
+#打印：缺失数据对应的变量+该变量缺失的数据
+miss[miss>0] 
+```
+
+### 查看有缺失数据的变量的描述性统计量
+```{r}
+summary(all[,names(miss)[miss>0]])
+#获取描述性统计量：最小值、最大值、四分位数和数值型变量的均值，因子向量和逻辑型向量：频数统计。
+```
+
+### 缺失数据的处理
+#### 直接删除存在大量缺失值的变量
+PoolQC、MiscFeature、Alley、Fence、FireplaceQu等变量缺失值比较多，是由于房子没有泳池、特殊的设施、旁边的小巷、篱笆、壁炉等这些特殊设施。 
+```{r}
+#缺失量比较多，我们直接移除这几个变量。
+Drop <- names(all) %in% c("PoolQC","MiscFeature","Alley","Fence","FireplaceQu") #做逻辑判断,如果这个all里面的某个变量的名字在后面那几个变量名列表里面,就为TRUE,其它为FALSE.这样获得了一个TRUE,FALSE的序列,被选中的那些都是TRUE.
+all <- all[!Drop]    #all只留下没被选中的那些变量
+```
+
+#### 将NA作为新的一个因子
+查看变量的描述文件可以知道，车库相关的5个变量(GarageType、GarageYrBlt、GarageFinish、GarageQual、GarageCond)也是由于房子没有车库而缺失。
+同理，BsmtExposure、BsmtFinType2、BsmtQual、BsmtCond、BsmtFinType1这5个变量是关于地下室的，都是由于房子没有地下室而缺失。
+此类变量缺失的数量比较少，直接用None来替换缺失值,代表这个房子不具备这个属性。
+```{r}
+#将如下变量的NA值填充为None
+Garage <- c("GarageType","GarageQual","GarageCond","GarageFinish")
+Bsmt <- c("BsmtExposure","BsmtFinType2","BsmtQual","BsmtCond","BsmtFinType1")
+for (x in c(Garage, Bsmt) )
+{
+  all[[x]] <- factor( all[[x]], levels= c(levels(all[[x]]),c('None')))
+  all[[x]][is.na(all[[x]])] <- "None"
+}
+```
+
+其中GarageYrBlt为车库的年份，我们用房子的建造年份来替代.
+
+```{r}
+#单独处理车库年份
+all$GarageYrBlt[is.na(all$GarageYrBlt)] <- all$YearBuilt[is.na(all$GarageYrBlt)]
+```
+
+#### 人工补齐缺失值
+
+对剩下的变量我们依次查看其详细数据，可以分别如下处理。
+变量 LotFrontage 是房子到街道的距离
+这是一个数值变量，我们用中位数Median来补充。
+```{r}
+#用中位数来填充
+all$LotFrontage[is.na(all$LotFrontage)] <- median(all$LotFrontage, na.rm = T)
+```
+
+变量 MasVnrType 外墙装饰材料
+这个变量对价钱的影响应该不大，MasVnrType中的NA用它本身的None来代替
+```{r}
+#用None补充
+all[["MasVnrType"]][is.na(all[["MasVnrType"]])] <- "None"
+```
+变量 MasVnrArea 外墙装饰材料的面积
+这个缺失值对应着MasVnrType的None值，应该将NA用0来替代
+
+```{r}
+#用0补充
+all[["MasVnrArea"]][is.na(all[["MasVnrArea"]])] <- 0
+```
+变量 Utilities 没有区分度，直接丢弃
+```{r}
+#删除变量Utilities
+all$Utilities <- NULL
+```
+变量 BsmtFullBath BsmtHalfBath BsmtFinSF1 BsmtFinSF2 BsmtUnfSF TotalBsmtSF GarageCars GarageArea 则是由于不存在相应的设施而缺失，这些变量都是数字变量，所以都补充为0即可。
+```{r}
+#由于设施缺失，导致数量缺失，补充为0 
+Param0 <- c("BsmtFullBath","BsmtHalfBath","BsmtFinSF1","BsmtFinSF2","BsmtUnfSF","TotalBsmtSF","GarageCars","GarageArea")
+for (x in Param0 )    all[[x]][is.na(all[[x]])] <- 0
+```
+变量MSZoning,Functional,Exterior1st,Exterior2nd,KitchenQual,Electrical,SaleType
+这些变量都是因子变量，并且只有几个缺失值，直接用最多的因子来代替
+
+```{r}
+#用最高频的因子来补充
+Req <- c("MSZoning","Functional","Exterior1st","Exterior2nd","KitchenQual","Electrical","SaleType")
+for (x in Req )    all[[x]][is.na(all[[x]])] <- levels(all[[x]])[which.max(table(all[[x]]))]
+```
+
+### 生成训练集
+
+经过一系列的缺失值补齐之后，我们看到最后剩余75个变量，并且不存在缺失数据。
+我们通过SalePrice是否为NA来将数据集拆分为训练集和测试集，为后面的模型训练做准备。
+
+```{r}
+#通过SalePrice是否为空来区分训练集和测试集
+train <- all[!is.na(all$SalePrice), ]
+test <- all[is.na(all$SalePrice), ]
+```
+
+# 统计模型的具体形式
+线性回归的最主要的问题就是自变量的选择。选择那些与最后预测的响应变量相关度比较高的特征变量是模型成功的第一步。变量选择有很多方法，其中最关键同时也是最直接的方法就是分析师根据业务场景人工筛选。
+我们首先尝试这种变量选择的方法，作为我们模型的第一步。
+
+## 初步模型
+这次题目给的自变量有很多，我们需要从中挑选对房价影响最大的变量。
+我们的思路是先人工挑选一些对房价影响比较重要的因素，然后再慢慢的添加新的变量来看是否会改变模型的精度。
+
+以国内的房价为例，影响房价的因素主要是房子面积、房子所在的区域、小区等，房龄、房型（小高层、多层、别墅等）、特殊场景（地铁房、学区房等）、装修等也会影响价格。
+这个数据是美国的房屋信息，不过基本的影响因素应该差不多。
+
+我们先来j建立简单的模型来，选择如下变量：
+
+- LotArea 房子的面积
+- Neighborhood 城市街区 用来初步代替 区域、小区
+- Condition1 Condition2 附近的交通情况
+- BldgType 房屋类型 独栋别墅、联排别墅
+- HouseStyle 房子的层数
+- YearBuilt 房子建造的年份
+- YearRemodAdd： 房子的改造年份
+- OverallQual： 房子整体质量，考量材料和完成度
+- OverallCond：房子整体条件
+
+装修越好的房子价格越高。
+
+查看各变量之间的相关性:
+```{r}
+# 相关系数画图
+#install.packages('corrgram')
+#library(corrgram)
+# <- c("LotArea","Neighborhood","BldgType","HouseStyle","YearBuilt","YearRemodAdd","OverallQual","OverallCond","MSZoning")
+
+#corrgram(train[,sel], order=TRUE, lower.panel=panel.shade, upper.panel=panel.pie, text.panel=panel.txt)
+```
+
+###  模型训练
+先用我们挑选的变量来建立一个 lm 模型，作为我们的 base 模型
+```{r}
+# 通过人工选择的变量来构造一个公式
+fm.base <- SalePrice ~ LotArea + Neighborhood + BldgType + HouseStyle + YearBuilt + YearRemodAdd + OverallQual + OverallCond
+
+# 训练模型
+lm.base <- lm(fm.base, train)
+
+# 查看模型概要
+summary(lm.base)
+```
+
+
+
+
+
+
+
+
+
+# 模型的结果分析与解释
+### 结果解读
+针对模型 summary 之后的结果，我们简单解读一下输出结果含义
+
+#### 残差统计量
+>  Residuals:
+>   Min      1Q  Median      3Q     Max 
+> -208970  -20882   -2917   15544  351199
+ 
+> 线性回归的计算基于一些假设，其中一个假设就是 误差符合相互独立、均值为 0 的正态分布。
+
+从本例可以看出这个残差的中位数为负数，数据整体左偏。其中的 1Q 和 3Q 是第一四分位（first quartile）和第三四分位（third quartile）。残差的最大值和最小值附近对应的记录则可能是异常值。
+
+由于残差代表预测值和真实值之间的差别，也就是说最大值 351199 表示我们预测的最大误差有 35 万美元之多。
+
+仅仅从残差的五数概括上看不出什么关键信息，后续可以通过残差图来检查残差是否符合正态分布的趋势。
+
+
+
+#### 回归系数
+> Coefficients:
+>                      Estimate Std. Error t value Pr(>|t|)    
+>(Intercept)         -1.455e+06  1.850e+05  -7.862 7.42e-15 
+>LotArea              1.084e+00  1.156e-01   9.375  < 2e-16 
+>NeighborhoodBlueste -1.068e+03  2.953e+04  -0.036 0.971141    
+>NeighborhoodBrDale  -1.440e+04  1.518e+04  -0.949 0.342806    
+>NeighborhoodBrkSide -1.876e+04  1.278e+04  -1.468 0.142460  
+>...
+>Signif. codes:  0 ‘***’  0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+线性回归拟合完成后得出的回归系数并不是准确的值，而是对于真实回归系数的估计值。
+
+既然是估计值则必然存在误差，上述结果中的
+> Estimate 表示回归系数的估计
+>Std. Error 表示回归系数的标准误差
+>t value 表示假设此回归系数为 0 时的 T 检验值
+>Pr(>|t|) 则是上述假设成立的置信度 p-value
+
+>P-value 越小则说明假设（假设回归系数为 0）越不容易出现，反过来就是此变量的回归系数不为 0 的几率越大，故此变量在整个回归拟合中作用越显著。一般用置信度 0.05 作为判断依据。
+
+
+
+- 最后的三颗星表示此变量显著，星号越多越显著，最多三个。
+- 最后一行 Signif. codes 标识着显著标识编码
+当 P-value 小于 0.001 时三颗星，小于 0.01 时两颗星，大于 0.05 则认为不太显著。
+
+#### $R^2$ 和 Adjusted $R^2$
+> Multiple R-squared:  0.7671,    Adjusted R-squared:  0.7605
+
+>R-squared（判定系数，coefficient of determination）也称为模型拟合的确定系数，取值 0~1 之间，越接近 1，表明模型的因变量对响应变量 y 的解释能力越强。
+>Adjusted R-squared: 当自变量个数增加时，尽管有的自变量与 y 的线性关系不显著，R square 也会增大。Adjusted R square 增加了对变量增多的惩罚，故我们以 Adjusted R square 为判断模型好坏的基本标准。
+
+
+本例中 Adjusted R-squared: 0.7605 表示响应变量有 76%的方差被此模型解释了。
+
+#### 模型整体的F检验
+> F-statistic: 116.8 on 40 and 1419 DF, p-value: < 2.2e-16。
+
+F 统计量用来检验模型是否显著。
+
+假设模型所有的回归系数均为 0，即该模型是不显著的。对此假设做 F 检验，在 p-value的置信度下拒绝了此假设，则模型为显著的。
+
+在本例中 p-value: < 2.2e-16，远远低于 0.05，所以模型是显著的。
+
+#### 变量选择 - 人工筛选
+
+模型 lm.base 的 Adjusted R-squared:是 0.7605。
+从第一个模型的结果看到变量 OverallCond 并不显著，所以我们去掉变量 OverallCond，重新进行拟合。
+拟合结果 Adjusted R-squared: 0.7603 和之前相差不大， 并且所有的变量都显著。
+故我们将第一个模型定为：
+
+```{r}
+# 初步决定的 lm.base 模型的变量
+fm.base <- SalePrice ~ LotArea + Neighborhood + BldgType + HouseStyle + YearBuilt + YearRemodAdd + OverallQual
+
+# 训练模型
+lm.base <- lm(fm.base, train)
+```
+
+
+模型出来了，我们把计算结果写入文件。
+```{r}
+# 用 lm.base 模型预测
+lm.pred <- predict(lm.base, test)
+
+# 写出结果文件
+res <- data.frame(Id = test$Id, SalePrice = lm.pred)
+write.csv(res, file = "D:/我的坚果云/GitHubCode/R/R_Stat_Course/R_Homework/R_LR/house-prices-advanced-regression-techniques/res_base.csv", row.names = FALSE)
+```
+
+
+# 参考文献
+[1] Regression Analysis by Example . Samprit Chatterjee, Ali S. Hadi
+
+[2] R in Action, Second Edition . Robert I. Kabacoff
+
+[3] Machine Learning With R Cookbook . Yu-Wei, Chiu (David Chiu)
+
+[4] Glmnet Vignette： http://web.stanford.edu/~hastie/glmnet/glmnet_alpha.html#qs
+
+# 附录(代码)
+(将以文件形式附在压缩包内)
